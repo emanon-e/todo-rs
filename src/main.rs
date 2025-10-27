@@ -5,8 +5,53 @@ use dialoguer::{Input, Select};
 use rusqlite::{Connection, fallible_iterator::FallibleIterator, params};
 
 const DB_PATH: &str = "db/sqlite.db";
-const MENU_OPERATIONS: [&str; 2] = ["List all todos", "Add todo"];
-const TODO_OPERATIONS: [&str; 3] = ["Toggle is completed", "Edit todo text", "Delete"];
+
+enum OperationResult<T> {
+    Success(T),
+    Quit,
+    Error(String),
+}
+
+enum MenuOperation {
+    ListAllTodos,
+    AddTodo,
+}
+
+impl fmt::Display for MenuOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            MenuOperation::ListAllTodos => "List all todos",
+            MenuOperation::AddTodo => "Add todo",
+        };
+        write!(f, "{}", text)
+    }
+}
+
+const MENU_OPERATIONS: [&'static MenuOperation; 2] =
+    [&MenuOperation::ListAllTodos, &MenuOperation::AddTodo];
+
+enum TodoOperation {
+    ToggleIsCompleted,
+    EditText,
+    Delete,
+}
+
+impl fmt::Display for TodoOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text: &'static str = match self {
+            TodoOperation::ToggleIsCompleted => "Toggle is completed",
+            TodoOperation::EditText => "Edit todo text",
+            TodoOperation::Delete => "Delete",
+        };
+        write!(f, "{}", text)
+    }
+}
+
+const TODO_OPERATIONS: [&'static TodoOperation; 3] = [
+    &TodoOperation::ToggleIsCompleted,
+    &TodoOperation::EditText,
+    &TodoOperation::Delete,
+];
 
 struct Todo {
     id: u32,
@@ -77,6 +122,132 @@ fn get_all_todos(conn: &Connection) -> Result<Vec<Todo>, rusqlite::Error> {
     Ok(todos)
 }
 
+fn select_menu_operation() -> OperationResult<&'static MenuOperation> {
+    let menu_operation = Select::new()
+        .with_prompt(format!(
+            "{}\n{}",
+            "Press Esc or q to quit".yellow(),
+            "Select an operation".cyan()
+        ))
+        .default(0)
+        .report(false)
+        .items(&MENU_OPERATIONS)
+        .interact_opt();
+
+    match menu_operation {
+        Ok(Some(idx)) => OperationResult::Success(MENU_OPERATIONS[idx]),
+        Ok(None) => OperationResult::Quit,
+        Err(e) => OperationResult::Error(e.to_string()),
+    }
+}
+
+fn select_todo(todos: &Vec<Todo>) -> OperationResult<usize> {
+    let selected_todo_index = Select::new()
+        .with_prompt(format!(
+            "{}\n{}",
+            "Press Esc or q to go to the menu".yellow(),
+            "Select a todo".cyan()
+        ))
+        .default(0)
+        .report(false)
+        .items(todos)
+        .max_length(5)
+        .interact_opt();
+
+    match selected_todo_index {
+        Ok(Some(idx)) => OperationResult::Success(idx),
+        Ok(None) => OperationResult::Quit,
+        Err(e) => OperationResult::Error(e.to_string()),
+    }
+}
+
+fn select_todo_operation() -> OperationResult<&'static TodoOperation> {
+    let todo_operation = Select::new()
+        .with_prompt(format!(
+            "{}\n{}",
+            "Press Esc or q to go to the menu".yellow(),
+            "Select an operation".cyan()
+        ))
+        .default(0)
+        .report(false)
+        .items(&TODO_OPERATIONS)
+        .interact_opt();
+
+    match todo_operation {
+        Ok(Some(idx)) => OperationResult::Success(TODO_OPERATIONS[idx]),
+        Ok(None) => OperationResult::Quit,
+        Err(e) => OperationResult::Error(e.to_string()),
+    }
+}
+
+fn get_input(prompt: &str, initial_text: &String) -> OperationResult<String> {
+    let input = Input::<String>::new()
+        .with_prompt(prompt)
+        .report(false)
+        .with_initial_text(initial_text)
+        .interact_text();
+
+    match input {
+        Ok(v) => OperationResult::Success(v),
+        Err(e) => OperationResult::Error(e.to_string()),
+    }
+}
+
+fn list_all_todos(conn: &Connection) -> OperationResult<()> {
+    let mut todos = match get_all_todos(&conn) {
+        Ok(v) => v,
+        Err(e) => return OperationResult::Error(e.to_string()),
+    };
+
+    loop {
+        let selected_todo_index = match select_todo(&todos) {
+            OperationResult::Success(idx) => idx,
+            OperationResult::Quit => break,
+            OperationResult::Error(e) => return OperationResult::Error(e),
+        };
+
+        let todo_operation = match select_todo_operation() {
+            OperationResult::Success(v) => v,
+            OperationResult::Quit => break,
+            OperationResult::Error(e) => return OperationResult::Error(e),
+        };
+
+        match todo_operation {
+            TodoOperation::ToggleIsCompleted => {
+                let selected_todo = &mut todos[selected_todo_index];
+
+                selected_todo.is_completed = !selected_todo.is_completed;
+                match update_todo(&conn, &selected_todo) {
+                    Err(e) => return OperationResult::Error(e.to_string()),
+                    _ => (),
+                };
+            }
+            TodoOperation::EditText => {
+                let selected_todo = &mut todos[selected_todo_index];
+
+                selected_todo.text = match get_input("Enter a new todo text", &selected_todo.text) {
+                    OperationResult::Success(v) => v,
+                    OperationResult::Quit => continue,
+                    OperationResult::Error(e) => return OperationResult::Error(e),
+                };
+                match update_todo(&conn, &selected_todo) {
+                    Err(e) => return OperationResult::Error(e.to_string()),
+                    _ => (),
+                };
+            }
+            TodoOperation::Delete => {
+                match delete_todo(&conn, todos[selected_todo_index].id) {
+                    Err(e) => return OperationResult::Error(e.to_string()),
+                    _ => (),
+                }
+                todos.remove(selected_todo_index);
+            }
+        }
+    }
+
+    OperationResult::Success(())
+}
+
 fn main() {
     let conn = match prepare_db() {
         Ok(c) => c,
@@ -86,158 +257,31 @@ fn main() {
         }
     };
 
-    // TODO: Extract large code blocks to functions
     loop {
-        let menu_operation = Select::new()
-            .with_prompt(format!(
-                "{}\n{}",
-                "Press Esc or q to quit".yellow(),
-                "Select an operation".cyan()
-            ))
-            .default(0)
-            .report(false)
-            .items(&MENU_OPERATIONS)
-            .interact_opt();
-
-        let menu_operation = match menu_operation {
-            Ok(Some(idx)) => idx,
-            Ok(None) => break,
-            Err(_) => {
-                println!("A cli error occured");
+        let menu_operation = match select_menu_operation() {
+            OperationResult::Success(v) => v,
+            OperationResult::Quit => break,
+            OperationResult::Error(e) => {
+                println!("{}", e);
                 return;
             }
         };
 
         match menu_operation {
-            0 => {
-                let mut todos = match get_all_todos(&conn) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        println!("Database error: {}", e);
-                        return;
-                    }
-                };
-
-                loop {
-                    let selected_todo_index = Select::new()
-                        .with_prompt(format!(
-                            "{}\n{}",
-                            "Press Esc or q to go to the menu".yellow(),
-                            "Select a todo".cyan()
-                        ))
-                        .default(0)
-                        .report(false)
-                        .items(&todos)
-                        .max_length(5)
-                        .interact_opt();
-
-                    let selected_todo_index = match selected_todo_index {
-                        Ok(Some(idx)) => idx,
-                        Ok(None) => break,
-                        Err(_) => {
-                            println!("A cli error occured");
-                            return;
-                        }
-                    };
-
-                    let todo_operation = Select::new()
-                        .with_prompt(format!(
-                            "{}\n{}",
-                            "Press Esc or q to go to the menu".yellow(),
-                            "Select an operation".cyan()
-                        ))
-                        .default(0)
-                        .report(false)
-                        .items(&TODO_OPERATIONS)
-                        .interact_opt();
-
-                    let todo_operation = match todo_operation {
-                        Ok(Some(idx)) => idx,
-                        Ok(None) => break,
-                        Err(_) => {
-                            println!("A cli error occured");
-                            return;
-                        }
-                    };
-
-                    match todo_operation {
-                        0 => {
-                            let selected_todo = match todos.get_mut(selected_todo_index) {
-                                Some(v) => v,
-                                None => {
-                                    println!("Something went wrong");
-                                    return;
-                                }
-                            };
-
-                            selected_todo.is_completed = !selected_todo.is_completed;
-                            match update_todo(&conn, &selected_todo) {
-                                Err(e) => {
-                                    println!("Database error: {}", e);
-                                    return;
-                                }
-                                _ => (),
-                            }
-                        }
-                        1 => {
-                            let selected_todo = match todos.get_mut(selected_todo_index) {
-                                Some(v) => v,
-                                None => {
-                                    println!("Something went wrong");
-                                    return;
-                                }
-                            };
-
-                            let todo_text = Input::<String>::new()
-                                .with_prompt("Enter a new todo text")
-                                .report(false)
-                                .with_initial_text(&selected_todo.text)
-                                .interact_text();
-
-                            let todo_text = match todo_text {
-                                Ok(v) => v,
-                                Err(_) => {
-                                    println!("A cli error occured");
-                                    return;
-                                }
-                            };
-
-                            selected_todo.text = todo_text;
-                            match update_todo(&conn, &selected_todo) {
-                                Err(e) => {
-                                    println!("Database error: {}", e);
-                                    return;
-                                }
-                                _ => (),
-                            }
-                        }
-                        2 => {
-                            match delete_todo(&conn, todos[selected_todo_index].id) {
-                                Err(e) => {
-                                    println!("Database error: {}", e);
-                                    return;
-                                }
-                                _ => (),
-                            }
-                            todos.remove(selected_todo_index);
-                        }
-                        _ => {
-                            println!("Something went wrong");
-                            return;
-                        }
-                    }
+            MenuOperation::ListAllTodos => match list_all_todos(&conn) {
+                OperationResult::Success(_) => (),
+                OperationResult::Quit => continue,
+                OperationResult::Error(e) => {
+                    println!("{}", e);
+                    return;
                 }
-            }
-            1 => {
-                let todo_text = Input::<String>::new()
-                    .with_prompt("Enter a new todo")
-                    .report(false)
-                    .interact_text();
-
-                let todo_text = match todo_text {
-                    Ok(t) => t,
-                    Err(_) => {
-                        println!("A cli error occured");
+            },
+            MenuOperation::AddTodo => {
+                let todo_text = match get_input("Enter a new todo", &"".to_string()) {
+                    OperationResult::Success(v) => v,
+                    OperationResult::Quit => continue,
+                    OperationResult::Error(e) => {
+                        println!("{}", e);
                         return;
                     }
                 };
@@ -249,10 +293,6 @@ fn main() {
                         return;
                     }
                 }
-            }
-            _ => {
-                println!("Something went wrong");
-                return;
             }
         }
     }
