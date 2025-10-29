@@ -105,7 +105,7 @@ fn main() {
                 }
             }
             MenuOperation::AddTodo => {
-                let todo_text = match get_text_input("Enter a new todo", &"".to_string()) {
+                let todo_text = match get_text_input("Enter a new todo", "") {
                     InputResult::Result(Ok(v)) => v,
                     InputResult::Result(Err(e)) => {
                         println!("Input error: {}", e);

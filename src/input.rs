@@ -108,7 +108,7 @@ pub fn select_todo_operation() -> InputResult<&'static TodoOperation> {
     }
 }
 
-pub fn get_text_input(prompt: &str, initial_text: &String) -> InputResult<String> {
+pub fn get_text_input(prompt: &str, initial_text: &str) -> InputResult<String> {
     let input = Input::<String>::new()
         .with_prompt(prompt)
         .report(false)
