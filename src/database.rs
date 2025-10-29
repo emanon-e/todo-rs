@@ -32,10 +32,7 @@ pub fn delete_todo(conn: &Connection, todo_id: u32) -> Result<usize, rusqlite::E
 }
 
 pub fn add_todo(conn: &Connection, todo_text: &str) -> Result<usize, rusqlite::Error> {
-    conn.execute(
-        "INSERT INTO TODOS(TEXT) VALUES(:todo_text)",
-        &[(":todo_text", todo_text)],
-    )
+    conn.execute("INSERT INTO TODOS(TEXT) VALUES(?1)", [todo_text])
 }
 
 pub fn get_all_todos(conn: &Connection) -> Result<Vec<Todo>, rusqlite::Error> {
