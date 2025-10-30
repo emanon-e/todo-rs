@@ -69,14 +69,14 @@ pub fn select_menu_operation() -> InputResult<&'static MenuOperation> {
     }
 }
 
-pub fn select_todo(todos: &Vec<Todo>) -> InputResult<usize> {
+pub fn select_todo(todos: &Vec<Todo>, default_selected_todo: usize) -> InputResult<usize> {
     let selected_todo_index = Select::new()
         .with_prompt(format!(
             "{}\n{}",
             "Press Esc or q to go to the menu".yellow(),
             "Select a todo".cyan()
         ))
-        .default(0)
+        .default(default_selected_todo)
         .report(false)
         .items(todos)
         .max_length(5)

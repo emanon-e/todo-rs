@@ -27,50 +27,56 @@ fn main() {
         };
 
         match menu_operation {
-            MenuOperation::ListAllTodos => loop {
-                let mut todos = match get_all_todos(&conn) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        println!("Database error: {}", e);
-                        return;
-                    }
-                };
+            MenuOperation::ListAllTodos => {
+                let mut default_selected_todo: usize = 0;
 
-                let selected_todo_index = match select_todo(&todos) {
-                    InputResult::Result(Ok(idx)) => idx,
-                    InputResult::Result(Err(e)) => {
-                        println!("Input error: {}", e);
-                        return;
-                    }
-                    InputResult::Quit => break,
-                };
+                loop {
+                    let mut todos = match get_all_todos(&conn) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            println!("Database error: {}", e);
+                            return;
+                        }
+                    };
 
-                let todo_operation = match select_todo_operation() {
-                    InputResult::Result(Ok(v)) => v,
-                    InputResult::Result(Err(e)) => {
-                        println!("Input error: {}", e);
-                        return;
-                    }
-                    InputResult::Quit => continue,
-                };
+                    let selected_todo_index = match select_todo(&todos, default_selected_todo) {
+                        InputResult::Result(Ok(idx)) => idx,
+                        InputResult::Result(Err(e)) => {
+                            println!("Input error: {}", e);
+                            return;
+                        }
+                        InputResult::Quit => break,
+                    };
 
-                let selected_todo = &mut todos[selected_todo_index];
+                    let todo_operation = match select_todo_operation() {
+                        InputResult::Result(Ok(v)) => v,
+                        InputResult::Result(Err(e)) => {
+                            println!("Input error: {}", e);
+                            return;
+                        }
+                        InputResult::Quit => continue,
+                    };
 
-                match todo_operation {
-                    TodoOperation::ToggleIsCompleted => {
-                        selected_todo.is_completed = !selected_todo.is_completed;
+                    let selected_todo = &mut todos[selected_todo_index];
+                    default_selected_todo = selected_todo_index;
 
-                        match update_todo(&conn, &selected_todo) {
-                            Err(e) => {
-                                println!("Database error: {}", e);
-                                return;
-                            }
-                            _ => (),
-                        };
-                    }
-                    TodoOperation::EditText => {
-                        selected_todo.text =
-                            match get_text_input("Enter a new todo text", &selected_todo.text) {
+                    match todo_operation {
+                        TodoOperation::ToggleIsCompleted => {
+                            selected_todo.is_completed = !selected_todo.is_completed;
+
+                            match update_todo(&conn, &selected_todo) {
+                                Err(e) => {
+                                    println!("Database error: {}", e);
+                                    return;
+                                }
+                                _ => (),
+                            };
+                        }
+                        TodoOperation::EditText => {
+                            selected_todo.text = match get_text_input(
+                                "Enter a new todo text",
+                                &selected_todo.text,
+                            ) {
                                 InputResult::Result(Ok(v)) => v,
                                 InputResult::Result(Err(e)) => {
                                     println!("Input error: {}", e);
@@ -78,25 +84,27 @@ fn main() {
                                 }
                                 InputResult::Quit => continue,
                             };
-                        match update_todo(&conn, &selected_todo) {
-                            Err(e) => {
-                                println!("Database error: {}", e);
-                                return;
+                            match update_todo(&conn, &selected_todo) {
+                                Err(e) => {
+                                    println!("Database error: {}", e);
+                                    return;
+                                }
+                                _ => (),
+                            };
+                        }
+                        TodoOperation::Delete => {
+                            match delete_todo(&conn, todos[selected_todo_index].id) {
+                                Err(e) => {
+                                    println!("Database error: {}", e);
+                                    return;
+                                }
+                                _ => (),
                             }
-                            _ => (),
-                        };
-                    }
-                    TodoOperation::Delete => {
-                        match delete_todo(&conn, todos[selected_todo_index].id) {
-                            Err(e) => {
-                                println!("Database error: {}", e);
-                                return;
-                            }
-                            _ => (),
+                            default_selected_todo = 0;
                         }
                     }
                 }
-            },
+            }
             MenuOperation::AddTodo => {
                 let todo_text = match get_text_input("Enter a new todo", "") {
                     InputResult::Result(Ok(v)) => v,
